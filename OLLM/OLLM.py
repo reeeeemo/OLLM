@@ -7,6 +7,7 @@
 '''
 
 import torch
+import os
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
@@ -28,7 +29,9 @@ batch_size = 32
 
 import torch
 
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device) # If the database takes a long time to load, breakpoint this code, and check if you got CUDA!
 
 '''
     Prepares dataset for training the model.
@@ -189,8 +192,8 @@ def generate_text(model, vocab, tokenizer, text, max_len=50):
 def main():
     # Tokenizer
     tokenizer = get_tokenizer('basic_english')
-    text = open('hamlet.txt').read() # Text Dataset 
-    
+    text = open('datasets\hamlet.txt').read() # Text Dataset 
+  
     # Build Vocabulary Corpus
     vocab = build_vocab(text, tokenizer)
     
@@ -214,9 +217,11 @@ def main():
     # Evaluation
     train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, criterion, device, num_epochs=num_epochs, patience=patience)
     
-    generative_text = "hello there bob"
     # Generation
-    print(generate_text(model, vocab, tokenizer, generative_text, len(generative_text)))
+    generative_text = ""
+    while (generative_text.lower() != "exit"):
+        generative_text = input("Enter your prompt! Type 'exit' to leave.\n")
+        print(generate_text(model, vocab, tokenizer, generative_text, len(generative_text)))
     
 
 if __name__== "__main__":
