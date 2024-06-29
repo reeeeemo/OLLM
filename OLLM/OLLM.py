@@ -7,6 +7,7 @@
 '''
 
 import torch
+import pandas as pd
 import os
 import torch.nn as nn
 import torch.optim as optim
@@ -192,13 +193,18 @@ def generate_text(model, vocab, tokenizer, text, max_len=50):
 def main():
     # Tokenizer
     tokenizer = get_tokenizer('basic_english')
-    text = open('datasets\hamlet.txt').read() # Text Dataset 
-  
+    
+    file_path = r'datasets\newPersonaTxtDataset.csv'
+
+    with open(file_path, encoding='utf-8') as f:
+        df = pd.read_csv(f.read(), encoding='utf-8') # Text Dataset 
+        text = ' '.join(df['text'])
+
     # Build Vocabulary Corpus
     vocab = build_vocab(text, tokenizer)
     
     # Training / Validation Set Split
-    lines = text.split('\n')
+    lines = text.split(',')
     train_text, val_text = train_test_split(lines, test_size=0.1)
     
     # Build Datasets
