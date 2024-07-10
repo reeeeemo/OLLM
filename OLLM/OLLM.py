@@ -5,7 +5,6 @@
     
     I would reccomend looking into tensors as well, as they are crucial for understanding how PyTorch works. (n-dimensional arrays)
 '''
-
 import torch
 import pandas as pd
 import os
@@ -19,13 +18,14 @@ from sklearn.model_selection import train_test_split
 import math
 
 # Constants
-embed_size = 256
-num_heads = 8
-hidden_dim = 512
-num_layers = 6
+embed_size = 64
+num_workers = 4
+num_heads = 2
+hidden_dim = 256
+num_layers = 2
 num_epochs = 50
 patience = 5
-batch_size = 32
+batch_size = 64
 
 
 import torch
@@ -40,11 +40,13 @@ print(device) # If the database takes a long time to load, breakpoint this code,
     Tokenizes input text and converts to numerical values (via a vocabulary)
 '''
 class TextDataset(Dataset):
-    def __init__(self, text, vocab, tokenizer):
+    def __init__(self, text, vocab, tokenizer, max_length=512):
         self.text = text
         self.vocab = vocab
         self.tokenizer = tokenizer
-        self.tokens = [vocab[token] for token in tokenizer(text)]
+        tokens = tokenizer(text)
+        self.tokens = [vocab.token2idx[token] for token in tokens]
+        print(f"Max Length: {max_length}, Actual Length: {len(self.tokens)}")
        
     def __len__(self):
         return len(self.tokens) - 1
@@ -67,7 +69,7 @@ class TransformerModel(nn.Module):
         super(TransformerModel, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.pos_encoder = PositionalEncoding(embed_size, dropout)
-        encoder_layers = nn.TransformerEncoderLayer(embed_size, num_heads, hidden_dim, dropout)
+        encoder_layers = nn.TransformerEncoderLayer(embed_size, num_heads, hidden_dim, dropout, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layers, num_layers)
         self.fc = nn.Linear(embed_size, vocab_size)
     
@@ -170,7 +172,7 @@ def train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, cr
             torch.save(model.state_dict(), 'best_model.pt')
         else:
             patience_counter += 1
-        if patience_counter == patience:
+        if patience_counter >= patience:
             print("Early stopping triggered")
             model.load_state_dict(torch.load('best_model.pt'))
             break
@@ -190,34 +192,39 @@ def generate_text(model, vocab, tokenizer, text, max_len=50):
     generated_text = [vocab.idx2token[token_id] for token_id in generated_tokens]
     return ' '.join(generated_text)
 
+def process_df(df):
+    return ' '.join(df['user 1 personas'] + ' ' + df['user 2 personas'] + ' ' + df['Best Generated Conversation'])
+
 def main():
     # Tokenizer
     tokenizer = get_tokenizer('basic_english')
     
-    file_path = r'datasets\newPersonaTxtDataset.csv'
+    file_path = r'datasets\newPersonaTxtDatasetSmall.csv'
 
-    with open(file_path, encoding='utf-8') as f:
-        df = pd.read_csv(f.read(), encoding='utf-8') # Text Dataset 
-        text = ' '.join(df['text'])
+    # Opening file and parsing data
+    df = pd.read_csv(file_path, encoding='utf-8') # Text Dataset 
+    text = process_df(df)
 
     # Build Vocabulary Corpus
     vocab = build_vocab(text, tokenizer)
     
     # Training / Validation Set Split
-    lines = text.split(',')
-    train_text, val_text = train_test_split(lines, test_size=0.1)
+    train_df, val_df = train_test_split(df, test_size=0.1)
+    
+    train_text = process_df(train_df)
+    val_text = process_df(val_df)
     
     # Build Datasets
-    train_dataset = TextDataset(' '.join(train_text), vocab, tokenizer)
-    val_dataset = TextDataset(' '.join(val_text), vocab, tokenizer)
+    train_dataset = TextDataset(train_text, vocab, tokenizer)
+    val_dataset = TextDataset(val_text, vocab, tokenizer)
     
     # Dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
     
     # Init Model and optimizer / loss functions
     model = TransformerModel(vocab_size=len(vocab), embed_size=embed_size, num_heads=num_heads, hidden_dim=hidden_dim, num_layers=num_layers).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
     criterion = nn.CrossEntropyLoss()
     
     # Evaluation
