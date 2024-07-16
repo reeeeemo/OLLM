@@ -6,26 +6,28 @@
     I would reccomend looking into tensors as well, as they are crucial for understanding how PyTorch works. (n-dimensional arrays)
 '''
 import torch
-import pandas as pd
-import os
+import pandas as pd # For CSV reading, if needed!
 import torch.nn as nn
 import torch.optim as optim
+import math
+import nltk
 from torch.utils.data import Dataset, DataLoader
 from torchtext.data.utils import get_tokenizer
-from collections import Counter
+from collections import Counter, OrderedDict
 from torchtext.vocab import Vocab
 from sklearn.model_selection import train_test_split
-import math
+from nltk.tokenize import word_tokenize
+
 
 # Constants
-embed_size = 64
-num_workers = 4
+embed_size = 64 
+num_workers = 2
 num_heads = 2
-hidden_dim = 256
+hidden_dim = 128
 num_layers = 2
 num_epochs = 50
-patience = 5
-batch_size = 64
+patience = 10
+batch_size = 32
 
 
 import torch
@@ -33,6 +35,9 @@ import torch
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device) # If the database takes a long time to load, breakpoint this code, and check if you got CUDA!
+
+# Tokenizer download
+nltk.download('punkt')
 
 '''
     Prepares dataset for training the model.
@@ -44,8 +49,8 @@ class TextDataset(Dataset):
         self.text = text
         self.vocab = vocab
         self.tokenizer = tokenizer
-        tokens = tokenizer(text)
-        self.tokens = [vocab.token2idx[token] for token in tokens]
+        tokens = tokenizer(text.lower())
+        self.tokens = [vocab.token2idx.get(token, vocab.token2idx['<unk>']) for token in tokens]
         print(f"Max Length: {max_length}, Actual Length: {len(self.tokens)}")
        
     def __len__(self):
@@ -105,10 +110,24 @@ class PositionalEncoding(nn.Module):
         
    
 # Builds our vocabulary from the text, and our tokenizer
-def build_vocab(text, tokenizer):
-    counter = Counter(tokenizer(text)) 
+def build_vocab(text, tokenizer, min_freq = 2):
+    tokens = tokenizer(text.lower())
+    counter = Counter(tokens)
     
-    token2idx = {token: idx for idx, token in enumerate(counter.keys())}
+    special_tokens = ['<unk>', '<pad>', '<bos>', '<eos>']
+    token2idx = OrderedDict()
+    
+
+    for token in special_tokens:
+        counter[token] = 1 # Ensure special tokens are in vocab
+        token2idx[token] = len(token2idx)
+     
+
+    for token, count in counter.items():
+        if count >= min_freq and token not in token2idx:
+            token2idx[token] = len(token2idx)
+            
+    # token2idx = {token: idx for idx, token in enumerate(counter.keys())}
     idx2token = {idx: token for token, idx in token2idx.items()}
     
     vocab = Vocab(counter)
@@ -146,7 +165,7 @@ def train_evaluate(model, train_loader, val_loader, optimizer, criterion, device
         val_loss = evaluate(model, val_loader, criterion, device)
         print(f'Epoch {epoch+1}, Train Loss: {total_loss/len(train_loader)}, Val Loss: {val_loss}')
 
-def train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, criterion, device, num_epochs, patience):
+def train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, criterion, device, vocab, tokenizer, num_epochs, patience):
     best_val_loss = float('inf')
     patience_counter = 0
     
@@ -166,6 +185,10 @@ def train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, cr
         val_loss = evaluate(model, val_loader, criterion, device)
         print(f'Epoch {epoch+1}, Train Loss: {total_loss/len(train_loader)}, Val Loss: {val_loss}')
         
+        # Generate a sample text after each epoch
+        sample_text = generate_text(model, vocab, tokenizer, "Hello, how are you?", max_len=20)
+        print(f"\n\n\nSample generation: {sample_text}\n\n\n")
+        
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
@@ -179,35 +202,53 @@ def train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, cr
      
 def generate_text(model, vocab, tokenizer, text, max_len=50):
     model.eval()
-    tokens = tokenizer(text)
-    src = torch.tensor([vocab[token] for token in tokens]).unsqueeze(0).to(device)
+    tokens = tokenizer(text.lower())
+    src = torch.tensor([vocab.token2idx.get(token, vocab.token2idx['<unk>']) for token in tokens]).unsqueeze(0).to(device)
     generated = src
     for _ in range(max_len):
         output = model(generated)
-        next_token = torch.argmax(output[:, -1, :], dim=1)
-        generated = torch.cat((generated, next_token.unsqueeze(0)), dim=1)
-        if next_token.item() == vocab['<eos>']:
+        next_token_idx = torch.argmax(output[:, -1, :], dim=1)
+        
+        if next_token_idx.item() == vocab.token2idx['<eos>']:
             break
+        
+        generated = torch.cat((generated, next_token_idx.unsqueeze(0)), dim=1)
+        
     generated_tokens = generated.squeeze().tolist()
     generated_text = [vocab.idx2token[token_id] for token_id in generated_tokens]
+    
+    generated_text = [token for token in generated_text if token not in ['<unk>', '<pad>', '<bos>', '<eos>']]
     return ' '.join(generated_text)
 
 def process_df(df):
-    return ' '.join(df['user 1 personas'] + ' ' + df['user 2 personas'] + ' ' + df['Best Generated Conversation'])
+    return ' '.join(df)
 
 def main():
-    # Tokenizer
-    tokenizer = get_tokenizer('basic_english')
-    
-    file_path = r'datasets\newPersonaTxtDatasetSmall.csv'
+    file_path = r'datasets\helper.txt'
 
     # Opening file and parsing data
-    df = pd.read_csv(file_path, encoding='utf-8') # Text Dataset 
+    with open(file_path, "r") as file:
+        df = file.readlines()
+    # df = pd.read_csv(file_path, encoding='utf-8') # If you have a CSV file, use this instead
     text = process_df(df)
+    
+    # Tokenizer
+    tokenizer = word_tokenize
 
     # Build Vocabulary Corpus
     vocab = build_vocab(text, tokenizer)
-    
+    print(f"Vocabulary size: {len(vocab)}")
+    print("First 10 tokens in vocabulary:")
+    for i, (token, idx) in enumerate(vocab.token2idx.items()):
+        if i < 10:
+            print(f"{token}: {idx}")
+        else:
+            break
+    print("\nLast 10 tokens in vocabulary:")
+    for token, idx in list(vocab.token2idx.items())[-10:]:
+        print(f"{token}: {idx}")
+
+
     # Training / Validation Set Split
     train_df, val_df = train_test_split(df, test_size=0.1)
     
@@ -228,7 +269,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     
     # Evaluation
-    train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, criterion, device, num_epochs=num_epochs, patience=patience)
+    train_evaluate_early_stopping(model, train_loader, val_loader, optimizer, criterion, device, vocab, tokenizer, num_epochs=num_epochs, patience=patience)
     
     # Generation
     generative_text = ""
