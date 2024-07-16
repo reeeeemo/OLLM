@@ -5,36 +5,36 @@
     
     I would reccomend looking into tensors as well, as they are crucial for understanding how PyTorch works. (n-dimensional arrays)
 '''
-import torch
-import pandas as pd # For CSV reading, if needed!
-import torch.nn as nn
-import torch.optim as optim
-import math
-import nltk
-from torch.utils.data import Dataset, DataLoader
-from torchtext.data.utils import get_tokenizer
-from collections import Counter, OrderedDict
-from torchtext.vocab import Vocab
-from sklearn.model_selection import train_test_split
-from nltk.tokenize import word_tokenize
+import torch # PyTorch
+import torchtext # PyTorch Text
 
+torchtext.disable_torchtext_deprecation_warning() # Since TorchText is depricated, gotta silence these warnings :<
+
+import pandas as pd # For CSV reading, if needed!
+import torch.nn as nn 
+import torch.optim as optim 
+import math 
+import nltk # For tokenization
+from torch.utils.data import Dataset, DataLoader 
+from torchtext.data.utils import get_tokenizer 
+from collections import Counter, OrderedDict 
+from torchtext.vocab import Vocab, torchtext; 
+from sklearn.model_selection import train_test_split
+from nltk.tokenize import word_tokenize # Tokenizer
+ 
 
 # Constants
-embed_size = 64 
-num_workers = 2
-num_heads = 2
+embed_size = 128 
+num_workers = 4
+num_heads = 4
 hidden_dim = 128
-num_layers = 2
-num_epochs = 50
-patience = 10
-batch_size = 32
-
-
-import torch
-
+num_layers = 4
+num_epochs = 100
+patience = 15
+batch_size = 64 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device) # If the database takes a long time to load, breakpoint this code, and check if you got CUDA!
+print(f"==========\nThis device is using: {device} for processing this LLM.\n==========\n") # If the database takes a long time to load, breakpoint this code, and check if you got CUDA!
 
 # Tokenizer download
 nltk.download('punkt')
@@ -51,7 +51,6 @@ class TextDataset(Dataset):
         self.tokenizer = tokenizer
         tokens = tokenizer(text.lower())
         self.tokens = [vocab.token2idx.get(token, vocab.token2idx['<unk>']) for token in tokens]
-        print(f"Max Length: {max_length}, Actual Length: {len(self.tokens)}")
        
     def __len__(self):
         return len(self.tokens) - 1
@@ -110,7 +109,7 @@ class PositionalEncoding(nn.Module):
         
    
 # Builds our vocabulary from the text, and our tokenizer
-def build_vocab(text, tokenizer, min_freq = 2):
+def build_vocab(text, tokenizer, min_freq = 5):
     tokens = tokenizer(text.lower())
     counter = Counter(tokens)
     
@@ -127,7 +126,6 @@ def build_vocab(text, tokenizer, min_freq = 2):
         if count >= min_freq and token not in token2idx:
             token2idx[token] = len(token2idx)
             
-    # token2idx = {token: idx for idx, token in enumerate(counter.keys())}
     idx2token = {idx: token for token, idx in token2idx.items()}
     
     vocab = Vocab(counter)
@@ -275,7 +273,7 @@ def main():
     generative_text = ""
     while (generative_text.lower() != "exit"):
         generative_text = input("Enter your prompt! Type 'exit' to leave.\n")
-        print(generate_text(model, vocab, tokenizer, generative_text, len(generative_text)))
+        print(generate_text(model, vocab, tokenizer, generative_text, max_len=100))
     
 
 if __name__== "__main__":
